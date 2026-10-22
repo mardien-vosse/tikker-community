@@ -1,0 +1,38 @@
+name: Import verified source archive
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify and restore source tree
+        shell: python
+        run: |
+          import hashlib, pathlib, stat, zipfile
+          archive = pathlib.Path('tikker-community-source.zip')
+          expected = '078cc62dd81943f24e08acb182d13f28dafce8b38219755f4e69ab8403581ff4'
+          assert hashlib.sha256(archive.read_bytes()).hexdigest() == expected
+          with zipfile.ZipFile(archive) as source:
+              for entry in source.infolist():
+                  parts = pathlib.PurePosixPath(entry.filename).parts
+                  assert parts[0] == 'tikker-community' and '..' not in parts
+                  assert not stat.S_ISLNK(entry.external_attr >> 16)
+                  assert len(parts) > 1 and not entry.is_dir()
+                  if parts[1] == '.github':
+                      continue
+                  target = pathlib.Path(*parts[1:])
+                  assert not target.is_absolute() and '.git' not in target.parts
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  target.write_bytes(source.read(entry))
+          archive.unlink()
+      - name: Commit restored files
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Restore verified Community source tree'
+          git push origin HEAD:main
